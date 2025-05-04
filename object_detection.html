@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Object Detection with MediaPipe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .camera-container, .detection-container {
+            position: relative;
+            width: 48%;
+            height: 600px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .detection-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+        }
+        .detection-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .detection-item {
+            background-color: #e1e1e1;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+        }
+        .detection-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Object Detection</h1>
+    
+    <div class="displays-container">
+        <!-- Camera feed with object detection -->
+        <div class="camera-container">
+            <div class="container-label">Camera Feed with Object Detection</div>
+            <video id="video" playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+        </div>
+
+        <!-- Detection only view -->
+        <div class="detection-container">
+            <div class="container-label">Detections Only</div>
+            <canvas id="detectionCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="detection-info">
+        <h3>Current Detections:</h3>
+        <div id="detectionList" class="detection-list">
+            <!-- Detection items will be added here dynamically -->
+        </div>
+        
+        <h3>Detection Information:</h3>
+        <p>This object detector can identify objects from the COCO dataset, including:</p>
+        <ul>
+            <li>People, animals (dogs, cats, birds, etc.)</li>
+            <li>Vehicles (cars, motorcycles, airplanes, etc.)</li>
+            <li>Furniture (chairs, tables, couches, etc.)</li>
+            <li>Common objects (cell phones, cups, books, etc.)</li>
+        </ul>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.11.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const cameraCanvas = document.getElementById('cameraCanvas');
+        const detectionCanvas = document.getElementById('detectionCanvas');
+        const detectionList = document.getElementById('detectionList');
+        
+        const cameraCtx = cameraCanvas.getContext('2d');
+        const detectionCtx = detectionCanvas.getContext('2d');
+        
+        // Set canvas sizes based on their container sizes
+        function resizeCanvases() {
+            const cameraContainer = document.querySelector('.camera-container');
+            const detectionContainer = document.querySelector('.detection-container');
+            
+            cameraCanvas.width = cameraContainer.clientWidth;
+            cameraCanvas.height = cameraContainer.clientHeight;
+            
+            detectionCanvas.width = detectionContainer.clientWidth;
+            detectionCanvas.height = detectionContainer.clientHeight;
+        }
+        
+        // Call resize on load and when window is resized
+        window.addEventListener('load', resizeCanvases);
+        window.addEventListener('resize', resizeCanvases);
+
+        // Color generator for consistent colors per class
+        const colorMap = {};
+        function getColorForClass(className) {
+            if (!colorMap[className]) {
+                const hue = Math.floor(Math.random() * 360);
+                colorMap[className] = `hsl(${hue}, 90%, 50%)`;
+            }
+            return colorMap[className];
+        }
+
+        // Initialize the object detection model
+        let model;
+        cocoSsd.load().then(loadedModel => {
+            model = loadedModel;
+            console.log('Model loaded successfully');
+        });
+
+        // Start the camera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                if (model) {
+                    await detectObjects();
+                }
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start();
+
+        // Perform object detection
+        async function detectObjects() {
+            // Get video dimensions
+            const videoWidth = videoElement.videoWidth;
+            const videoHeight = videoElement.videoHeight;
+            
+            if (videoWidth === 0 || videoHeight === 0) return;
+            
+            // Perform detection
+            const predictions = await model.detect(videoElement);
+            
+            // Clear canvases
+            cameraCtx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+            detectionCtx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+            
+            // Draw video feed on camera canvas
+            cameraCtx.drawImage(videoElement, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            
+            // Draw black background on detection canvas
+            detectionCtx.fillStyle = '#000000';
+            detectionCtx.fillRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+            
+            // Clear detection list
+            detectionList.innerHTML = '';
+            
+            // Process each detected object
+            predictions.forEach(prediction => {
+                const [x, y, width, height] = prediction.bbox;
+                const className = prediction.class;
+                const score = Math.round(prediction.score * 100);
+                const color = getColorForClass(className);
+                
+                // Calculate scaled coordinates for both canvases
+                const cameraX = (x / videoWidth) * cameraCanvas.width;
+                const cameraY = (y / videoHeight) * cameraCanvas.height;
+                const cameraW = (width / videoWidth) * cameraCanvas.width;
+                const cameraH = (height / videoHeight) * cameraCanvas.height;
+                
+                const detectionX = (x / videoWidth) * detectionCanvas.width;
+                const detectionY = (y / videoHeight) * detectionCanvas.height;
+                const detectionW = (width / videoWidth) * detectionCanvas.width;
+                const detectionH = (height / videoHeight) * detectionCanvas.height;
+                
+                // Draw bounding box on camera canvas
+                cameraCtx.strokeStyle = color;
+                cameraCtx.lineWidth = 2;
+                cameraCtx.strokeRect(cameraX, cameraY, cameraW, cameraH);
+                
+                // Add label background on camera canvas
+                cameraCtx.fillStyle = color;
+                const labelText = `${className} ${score}%`;
+                const labelWidth = cameraCtx.measureText(labelText).width + 10;
+                cameraCtx.fillRect(cameraX, cameraY - 25, labelWidth, 25);
+                
+                // Add label text on camera canvas
+                cameraCtx.fillStyle = 'white';
+                cameraCtx.font = '16px Arial';
+                cameraCtx.fillText(labelText, cameraX + 5, cameraY - 7);
+                
+                // Draw object representation on detection canvas
+                detectionCtx.strokeStyle = color;
+                detectionCtx.lineWidth = 2;
+                detectionCtx.strokeRect(detectionX, detectionY, detectionW, detectionH);
+                
+                // Add label background on detection canvas
+                detectionCtx.fillStyle = color;
+                detectionCtx.fillRect(detectionX, detectionY - 25, labelWidth, 25);
+                
+                // Add label text on detection canvas
+                detectionCtx.fillStyle = 'white';
+                detectionCtx.font = '16px Arial';
+                detectionCtx.fillText(labelText, detectionX + 5, detectionY - 7);
+                
+                // Extract a small image of the object for the detection-only view
+                try {
+                    const objectImg = videoElement;
+                    detectionCtx.drawImage(
+                        objectImg, 
+                        x, y, width, height,
+                        detectionX, detectionY, detectionW, detectionH
+                    );
+                } catch (e) {
+                    console.error('Error displaying object crop:', e);
+                }
+                
+                // Add to detection list
+                const detectionItem = document.createElement('div');
+                detectionItem.className = 'detection-item';
+                
+                const colorSwatch = document.createElement('div');
+                colorSwatch.className = 'detection-color';
+                colorSwatch.style.backgroundColor = color;
+                
+                detectionItem.appendChild(colorSwatch);
+                detectionItem.appendChild(document.createTextNode(`${className} (${score}%)`));
+                detectionList.appendChild(detectionItem);
+            });
+        }
+    </script>
+</body>
+</html>

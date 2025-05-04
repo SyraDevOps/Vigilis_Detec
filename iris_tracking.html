@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Iris Tracking with MediaPipe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .camera-container, .iris-container {
+            position: relative;
+            width: 48%;
+            height: 600px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .eye-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+        }
+        .eye-metrics {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+        .eye-metric {
+            background-color: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            width: 22%;
+            text-align: center;
+        }
+        .eye-metric h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #555;
+        }
+        .eye-metric .value {
+            font-size: 22px;
+            font-weight: bold;
+            color: #333;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Iris Tracking</h1>
+    
+    <div class="displays-container">
+        <!-- Camera feed with iris tracking -->
+        <div class="camera-container">
+            <div class="container-label">Camera Feed with Iris Tracking</div>
+            <video id="video" playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+        </div>
+
+        <!-- Iris close-up view -->
+        <div class="iris-container">
+            <div class="container-label">Eye Region Close-up</div>
+            <canvas id="irisCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="eye-metrics">
+        <div class="eye-metric">
+            <h4>Left Eye Opening</h4>
+            <div id="leftEyeOpening" class="value">--</div>
+        </div>
+        <div class="eye-metric">
+            <h4>Right Eye Opening</h4>
+            <div id="rightEyeOpening" class="value">--</div>
+        </div>
+        <div class="eye-metric">
+            <h4>Horizontal Gaze</h4>
+            <div id="horizontalGaze" class="value">--</div>
+        </div>
+        <div class="eye-metric">
+            <h4>Vertical Gaze</h4>
+            <div id="verticalGaze" class="value">--</div>
+        </div>
+    </div>
+
+    <div class="eye-info">
+        <h3>Iris Tracking Information:</h3>
+        <p>MediaPipe's Iris Tracking model detects:</p>
+        <ul>
+            <li>5 facial landmarks for face detection</li>
+            <li>98 landmarks around the eyes and eyebrows</li>
+            <li>Precise iris landmarks that help determine where you're looking</li>
+        </ul>
+        <p>Applications include:</p>
+        <ul>
+            <li>Eye-tracking for accessibility features</li>
+            <li>Virtual try-on for glasses</li>
+            <li>Improved AR experiences</li>
+            <li>Gaze-based interfaces</li>
+            <li>Driver attention monitoring</li>
+        </ul>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const cameraCanvas = document.getElementById('cameraCanvas');
+        const irisCanvas = document.getElementById('irisCanvas');
+        
+        const leftEyeOpeningElement = document.getElementById('leftEyeOpening');
+        const rightEyeOpeningElement = document.getElementById('rightEyeOpening');
+        const horizontalGazeElement = document.getElementById('horizontalGaze');
+        const verticalGazeElement = document.getElementById('verticalGaze');
+        
+        const cameraCtx = cameraCanvas.getContext('2d');
+        const irisCtx = irisCanvas.getContext('2d');
+        
+        // Set canvas sizes based on their container sizes
+        function resizeCanvases() {
+            const cameraContainer = document.querySelector('.camera-container');
+            const irisContainer = document.querySelector('.iris-container');
+            
+            cameraCanvas.width = cameraContainer.clientWidth;
+            cameraCanvas.height = cameraContainer.clientHeight;
+            
+            irisCanvas.width = irisContainer.clientWidth;
+            irisCanvas.height = irisContainer.clientHeight;
+        }
+        
+        // Call resize on load and when window is resized
+        window.addEventListener('load', resizeCanvases);
+        window.addEventListener('resize', resizeCanvases);
+
+        // Eye landmark indices
+        const LEFT_EYE_INDICES = [
+            33, 7, 163, 144, 145, 153, 154, 155, 133, 173, 157, 158, 159, 160, 161, 246  
+        ];
+        
+        const RIGHT_EYE_INDICES = [
+            362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 386, 385, 384, 398
+        ];
+        
+        // Iris indices - last 5 landmarks for each eye represent the iris
+        const LEFT_IRIS_INDICES = [468, 469, 470, 471, 472];
+        const RIGHT_IRIS_INDICES = [473, 474, 475, 476, 477];
+
+        function onResults(results) {
+            // Process camera canvas - show camera feed + iris tracking
+            cameraCtx.save();
+            cameraCtx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+            cameraCtx.drawImage(results.image, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            
+            // Process iris canvas - show eye regions close-up
+            irisCtx.save();
+            irisCtx.clearRect(0, 0, irisCanvas.width, irisCanvas.height);
+            irisCtx.fillStyle = '#000000';
+            irisCtx.fillRect(0, 0, irisCanvas.width, irisCanvas.height);
+            
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+                
+                // Draw face mesh edges on camera canvas
+                drawConnectors(
+                    cameraCtx, landmarks, FACEMESH_TESSELATION,
+                    {color: 'rgba(180, 180, 180, 0.3)', lineWidth: 0.5});
+                
+                // Extract eye landmarks
+                const leftEyePoints = LEFT_EYE_INDICES.map(idx => landmarks[idx]);
+                const rightEyePoints = RIGHT_EYE_INDICES.map(idx => landmarks[idx]);
+                const leftIrisPoints = LEFT_IRIS_INDICES.map(idx => landmarks[idx]);
+                const rightIrisPoints = RIGHT_IRIS_INDICES.map(idx => landmarks[idx]);
+                
+                // Draw eye contours on camera canvas
+                drawEyeContours(cameraCtx, leftEyePoints, '#30FF30', cameraCanvas.width, cameraCanvas.height);
+                drawEyeContours(cameraCtx, rightEyePoints, '#30FF30', cameraCanvas.width, cameraCanvas.height);
+                
+                // Draw iris on camera canvas
+                drawIris(cameraCtx, leftIrisPoints, '#FFFF00', cameraCanvas.width, cameraCanvas.height);
+                drawIris(cameraCtx, rightIrisPoints, '#FFFF00', cameraCanvas.width, cameraCanvas.height);
+                
+                // Get bounding boxes for both eyes on the camera
+                const leftEyeBounds = getEyeBounds(leftEyePoints, cameraCanvas.width, cameraCanvas.height);
+                const rightEyeBounds = getEyeBounds(rightEyePoints, cameraCanvas.width, cameraCanvas.height);
+                
+                // Draw eye region boundaries on camera
+                cameraCtx.strokeStyle = '#FF3030';
+                cameraCtx.lineWidth = 2;
+                cameraCtx.strokeRect(leftEyeBounds.x, leftEyeBounds.y, leftEyeBounds.width, leftEyeBounds.height);
+                cameraCtx.strokeRect(rightEyeBounds.x, rightEyeBounds.y, rightEyeBounds.width, rightEyeBounds.height);
+                
+                // Create the eye close-up view
+                drawEyeCloseup(irisCtx, results.image, leftEyeBounds, rightEyeBounds, landmarks, irisCanvas.width, irisCanvas.height);
+                
+                // Calculate and display eye metrics
+                calculateEyeMetrics(landmarks, leftEyePoints, rightEyePoints, leftIrisPoints, rightIrisPoints);
+            }
+            
+            cameraCtx.restore();
+            irisCtx.restore();
+        }
+        
+        // Draw eye contours
+        function drawEyeContours(ctx, points, color, canvasWidth, canvasHeight) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            
+            for (let i = 0; i < points.length; i++) {
+                const x = points[i].x * canvasWidth;
+                const y = points[i].y * canvasHeight;
+                
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            }
+            
+            ctx.closePath();
+            ctx.stroke();
+        }
+        
+        // Draw iris (circle approximation)
+        function drawIris(ctx, points, color, canvasWidth, canvasHeight) {
+            // First point is the center
+            const centerX = points[0].x * canvasWidth;
+            const centerY = points[0].y * canvasHeight;
+            
+            // Calculate radius as average distance from other points to center
+            let radius = 0;
+            for (let i = 1; i < points.length; i++) {
+                const x = points[i].x * canvasWidth;
+                const y = points[i].y * canvasHeight;
+                const distance = Math.sqrt(Math.pow(x - centerX, 2) + Math.pow(y - centerY, 2));
+                radius += distance;
+            }
+            radius /= (points.length - 1);
+            
+            // Draw iris circle
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Draw center point
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 2, 0, 2 * Math.PI);
+            ctx.fill();
+        }
+        
+        // Get bounding box for eye region
+        function getEyeBounds(points, canvasWidth, canvasHeight) {
+            let minX = Infinity, minY = Infinity, maxX = 0, maxY = 0;
+            
+            for (const point of points) {
+                const x = point.x * canvasWidth;
+                const y = point.y * canvasHeight;
+                
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+            }
+            
+            // Add padding around the eye
+            const padding = 15;
+            minX -= padding;
+            minY -= padding;
+            maxX += padding;
+            maxY += padding;
+            
+            return {
+                x: minX,
+                y: minY,
+                width: maxX - minX,
+                height: maxY - minY
+            };
+        }
+        
+        // Draw the eye close-up on the iris canvas
+        function drawEyeCloseup(ctx, image, leftEyeBounds, rightEyeBounds, landmarks, canvasWidth, canvasHeight) {
+            // Clear the canvas with dark background
+            ctx.fillStyle = '#141414';
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+            
+            // Calculate dimensions for eye displays
+            const padding = 20;
+            const eyeAreaWidth = (canvasWidth - 3 * padding) / 2;
+            
+            // Draw left eye region
+            ctx.save();
+            ctx.translate(padding, padding);
+            drawSingleEyeCloseup(
+                ctx, image, leftEyeBounds, 
+                LEFT_EYE_INDICES.map(idx => landmarks[idx]),
+                LEFT_IRIS_INDICES.map(idx => landmarks[idx]),
+                eyeAreaWidth, canvasHeight - 2 * padding,
+                "Left Eye"
+            );
+            ctx.restore();
+            
+            // Draw right eye region
+            ctx.save();
+            ctx.translate(padding * 2 + eyeAreaWidth, padding);
+            drawSingleEyeCloseup(
+                ctx, image, rightEyeBounds, 
+                RIGHT_EYE_INDICES.map(idx => landmarks[idx]),
+                RIGHT_IRIS_INDICES.map(idx => landmarks[idx]),
+                eyeAreaWidth, canvasHeight - 2 * padding,
+                "Right Eye"
+            );
+            ctx.restore();
+        }
+        
+        // Draw a single eye close-up
+        function drawSingleEyeCloseup(ctx, image, eyeBounds, eyePoints, irisPoints, width, height, label) {
+            // Calculate zoom level to fit eye in the available space
+            const maxZoom = 3; // Maximum zoom level
+            const widthRatio = width / eyeBounds.width;
+            const heightRatio = height / eyeBounds.height;
+            const zoom = Math.min(maxZoom, widthRatio, heightRatio) * 0.8; // 80% of max zoom for some padding
+            
+            // Calculate centered position
+            const centerX = eyeBounds.x + eyeBounds.width / 2;
+            const centerY = eyeBounds.y + eyeBounds.height / 2;
+            
+            // Calculate new bounds for the zoomed in view
+            const newWidth = width / zoom;
+            const newHeight = height / zoom;
+            const newX = centerX - newWidth / 2;
+            const newY = centerY - newHeight / 2;
+            
+            // Draw zoomed eye region from the video
+            try {
+                ctx.drawImage(
+                    image,
+                    newX, newY, newWidth, newHeight,
+                    0, 0, width, height
+                );
+            } catch (e) {
+                console.error('Error displaying eye crop:', e);
+            }
+            
+            // Draw eye label
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, height - 30, width, 30);
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, width / 2, height - 10);
+            
+            // Adjust eye points for the zoomed view
+            const scaledEyePoints = eyePoints.map(point => ({
+                x: (point.x * image.width - newX) / newWidth,
+                y: (point.y * image.height - newY) / newHeight
+            }));
+            
+            const scaledIrisPoints = irisPoints.map(point => ({
+                x: (point.x * image.width - newX) / newWidth,
+                y: (point.y * image.height - newY) / newHeight
+            }));
+            
+            // Draw eye contour and iris on the zoomed view
+            drawEyeContours(ctx, scaledEyePoints, '#30FF30', width, height);
+            drawIris(ctx, scaledIrisPoints, '#FFFF00', width, height);
+        }
+        
+        // Calculate metrics about the eyes
+        function calculateEyeMetrics(landmarks, leftEyePoints, rightEyePoints, leftIrisPoints, rightIrisPoints) {
+            // Calculate eye openness (ratio of height to width)
+            const leftEyeOpenness = calculateEyeOpenness(leftEyePoints);
+            const rightEyeOpenness = calculateEyeOpenness(rightEyePoints);
+            
+            // Calculate gaze direction
+            const { horizontalGaze, verticalGaze } = calculateGazeDirection(
+                leftIrisPoints[0], rightIrisPoints[0], leftEyePoints, rightEyePoints
+            );
+            
+            // Update UI
+            leftEyeOpeningElement.textContent = `${Math.round(leftEyeOpenness * 100)}%`;
+            rightEyeOpeningElement.textContent = `${Math.round(rightEyeOpenness * 100)}%`;
+            horizontalGazeElement.textContent = horizontalGaze;
+            verticalGazeElement.textContent = verticalGaze;
+        }
+        
+        // Calculate eye openness as ratio of height to width
+        function calculateEyeOpenness(eyePoints) {
+            // Get top and bottom center points
+            const topIndex = 3;  // Approximate top center index
+            const bottomIndex = 11; // Approximate bottom center index
+            
+            // Get left and right points
+            const leftIndex = 0;
+            const rightIndex = 8;
+            
+            const topY = eyePoints[topIndex].y;
+            const bottomY = eyePoints[bottomIndex].y;
+            const leftX = eyePoints[leftIndex].x;
+            const rightX = eyePoints[rightIndex].x;
+            
+            const height = Math.abs(topY - bottomY);
+            const width = Math.abs(rightX - leftX);
+            
+            // Normalize by width to get relative openness
+            return height / width * 2.5; // Scale factor to make it more readable
+        }
+        
+        // Calculate gaze direction based on iris positions
+        function calculateGazeDirection(leftIrisCenter, rightIrisCenter, leftEyePoints, rightEyePoints) {
+            // Get eye centers
+            const leftEyeCenter = getEyeCenter(leftEyePoints);
+            const rightEyeCenter = getEyeCenter(rightEyePoints);
+            
+            // Calculate horizontal offset (average of both eyes)
+            const leftOffset = (leftIrisCenter.x - leftEyeCenter.x) * 4; // Magnify for visibility
+            const rightOffset = (rightIrisCenter.x - rightEyeCenter.x) * 4;
+            const horizontalOffset = (leftOffset + rightOffset) / 2;
+            
+            // Calculate vertical offset (average of both eyes)
+            const leftVertical = (leftIrisCenter.y - leftEyeCenter.y) * 4;
+            const rightVertical = (rightIrisCenter.y - rightEyeCenter.y) * 4;
+            const verticalOffset = (leftVertical + rightVertical) / 2;
+            
+            // Convert to direction labels
+            let horizontalGaze = "Center";
+            if (horizontalOffset < -0.1) horizontalGaze = "Left";
+            if (horizontalOffset > 0.1) horizontalGaze = "Right";
+            
+            let verticalGaze = "Center";
+            if (verticalOffset < -0.1) verticalGaze = "Up";
+            if (verticalOffset > 0.1) verticalGaze = "Down";
+            
+            return { horizontalGaze, verticalGaze };
+        }
+        
+        // Calculate center of eye from eye points
+        function getEyeCenter(eyePoints) {
+            let totalX = 0, totalY = 0;
+            
+            for (const point of eyePoints) {
+                totalX += point.x;
+                totalY += point.y;
+            }
+            
+            return {
+                x: totalX / eyePoints.length,
+                y: totalY / eyePoints.length
+            };
+        }
+
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+            }
+        });
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true, // Enable iris tracking
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start();
+    </script>
+</body>
+</html>
