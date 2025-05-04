@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Reconhecimento de Voz em Português</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .recognition-container, .visualization-container {
+            position: relative;
+            width: 48%;
+            height: 400px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+            background-color: #f8f8f8;
+            padding: 15px;
+            box-sizing: border-box;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        canvas {
+            width: 100%;
+            height: 100%;
+            background-color: #000;
+            border-radius: 4px;
+        }
+        .controls {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        .recognition-output {
+            min-height: 200px;
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 10px;
+            background-color: white;
+            border-radius: 4px;
+            margin-top: 20px;
+            box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+            font-family: 'Courier New', monospace;
+        }
+        .btn {
+            padding: 10px 15px;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.2s;
+        }
+        .btn:hover {
+            background-color: #356ac3;
+        }
+        .btn:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .control-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .target-words {
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 16px;
+        }
+        .status-indicator {
+            height: 15px;
+            width: 15px;
+            border-radius: 50%;
+            display: inline-block;
+            background-color: #ccc;
+            margin-right: 10px;
+            transition: background-color 0.3s;
+        }
+        .active {
+            background-color: #4CAF50;
+            box-shadow: 0 0 8px #4CAF50;
+        }
+        .highlight {
+            background-color: #ffeb3b;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-weight: bold;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Reconhecimento de Voz em Português</h1>
+    
+    <div class="displays-container">
+        <!-- Speech recognition output -->
+        <div class="recognition-container">
+            <div class="container-label">Resultados do Reconhecimento</div>
+            <div id="status" class="control-group" style="margin-bottom: 15px;">
+                <span class="status-indicator" id="statusIndicator"></span>
+                <span id="statusText">Microfone inativo</span>
+            </div>
+            <div class="recognition-output" id="output">
+                Os resultados do reconhecimento aparecerão aqui...
+            </div>
+        </div>
+
+        <!-- Audio visualization -->
+        <div class="visualization-container">
+            <div class="container-label">Visualização de Áudio</div>
+            <canvas id="visualizer"></canvas>
+        </div>
+    </div>
+
+    <div class="controls">
+        <div class="control-group">
+            <button id="startBtn" class="btn">Iniciar</button>
+            <button id="stopBtn" class="btn" disabled>Parar</button>
+        </div>
+        
+        <div class="control-group">
+            <label for="targetWords">Palavras para reconhecer (separadas por vírgula):</label>
+            <input type="text" id="targetWords" class="target-words" placeholder="olá, brasil, teste, voz" value="olá, teste, português, reconhecimento">
+        </div>
+    </div>
+
+    <script>
+        // DOM elements
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const outputDiv = document.getElementById('output');
+        const statusIndicator = document.getElementById('statusIndicator');
+        const statusText = document.getElementById('statusText');
+        const visualizer = document.getElementById('visualizer');
+        const targetWordsInput = document.getElementById('targetWords');
+        
+        // Set up canvas for visualization
+        const canvas = visualizer;
+        const canvasCtx = canvas.getContext('2d');
+        
+        // Make sure canvas dimensions match its displayed size
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+
+        // Speech recognition setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        
+        // Configure recognition for Portuguese language
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'pt-BR'; // Set to Brazilian Portuguese
+
+        // Variables for audio processing
+        let audioContext;
+        let analyser;
+        let microphone;
+        let dataArray;
+        let isListening = false;
+        
+        // Set up audio visualization
+        async function setupAudioVisualization() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                
+                // Configure analyser
+                analyser.fftSize = 2048;
+                const bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+                
+                // Connect microphone to analyser
+                microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+                
+                // Start visualization
+                visualize();
+            } catch (err) {
+                console.error('Erro ao acessar o microfone:', err);
+                alert('Erro ao acessar o microfone. Certifique-se de que você tem um microfone conectado e concedeu permissão para utilizá-lo.');
+            }
+        }
+        
+        // Draw the audio visualization
+        function visualize() {
+            // Set up animation
+            const draw = function() {
+                if (!isListening) return;
+                
+                requestAnimationFrame(draw);
+                
+                // Get audio data
+                analyser.getByteTimeDomainData(dataArray);
+                
+                // Clear canvas
+                canvasCtx.fillStyle = 'rgb(20, 20, 30)';
+                canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw waveform
+                canvasCtx.lineWidth = 2;
+                canvasCtx.strokeStyle = 'rgb(0, 255, 0)';
+                canvasCtx.beginPath();
+                
+                const sliceWidth = canvas.width * 1.0 / dataArray.length;
+                let x = 0;
+                
+                for (let i = 0; i < dataArray.length; i++) {
+                    const v = dataArray[i] / 128.0;
+                    const y = v * canvas.height / 2;
+                    
+                    if (i === 0) {
+                        canvasCtx.moveTo(x, y);
+                    } else {
+                        canvasCtx.lineTo(x, y);
+                    }
+                    
+                    x += sliceWidth;
+                }
+                
+                canvasCtx.lineTo(canvas.width, canvas.height / 2);
+                canvasCtx.stroke();
+            };
+            
+            draw();
+        }
+        
+        // Start speech recognition
+        function startRecognition() {
+            if (!recognition) {
+                alert('O reconhecimento de voz não é suportado no seu navegador.');
+                return;
+            }
+            
+            isListening = true;
+            recognition.start();
+            
+            // Update UI
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            statusIndicator.classList.add('active');
+            statusText.textContent = 'Escutando...';
+            
+            // Set up audio visualization if not already set up
+            if (!audioContext) {
+                setupAudioVisualization();
+            } else {
+                visualize();
+            }
+        }
+        
+        // Stop speech recognition
+        function stopRecognition() {
+            isListening = false;
+            recognition.stop();
+            
+            // Update UI
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            statusIndicator.classList.remove('active');
+            statusText.textContent = 'Microfone inativo';
+        }
+        
+        // Get target words to recognize
+        function getTargetWords() {
+            return targetWordsInput.value
+                .split(',')
+                .map(word => word.trim().toLowerCase())
+                .filter(word => word.length > 0);
+        }
+        
+        // Highlight target words in the transcript
+        function highlightTargetWords(transcript) {
+            const targetWords = getTargetWords();
+            
+            if (targetWords.length === 0) return transcript;
+            
+            let highlightedText = transcript;
+            
+            targetWords.forEach(word => {
+                const regex = new RegExp(`\\b${word}\\b`, 'gi');
+                highlightedText = highlightedText.replace(regex, match => `<span class="highlight">${match}</span>`);
+            });
+            
+            return highlightedText;
+        }
+        
+        // Event listeners
+        startBtn.addEventListener('click', startRecognition);
+        stopBtn.addEventListener('click', stopRecognition);
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            canvas.width = canvas.clientWidth;
+            canvas.height = canvas.clientHeight;
+        });
+        
+        // Speech recognition event handlers
+        recognition.onresult = function(event) {
+            let interimTranscript = '';
+            let finalTranscript = '';
+            
+            for (let i = event.resultIndex; i < event.results.length; i++) {
+                const transcript = event.results[i][0].transcript;
+                
+                if (event.results[i].isFinal) {
+                    finalTranscript += transcript;
+                } else {
+                    interimTranscript += transcript;
+                }
+            }
+            
+            // Update output display
+            if (finalTranscript) {
+                const p = document.createElement('p');
+                p.innerHTML = highlightTargetWords(finalTranscript);
+                outputDiv.appendChild(p);
+                
+                // Auto scroll to bottom
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            }
+            
+            // Show interim results
+            if (interimTranscript) {
+                let interimElement = document.getElementById('interim');
+                
+                if (!interimElement) {
+                    interimElement = document.createElement('p');
+                    interimElement.id = 'interim';
+                    interimElement.style.opacity = '0.6';
+                    outputDiv.appendChild(interimElement);
+                }
+                
+                interimElement.innerHTML = highlightTargetWords(interimTranscript);
+                
+                // Auto scroll to bottom
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            }
+        };
+        
+        recognition.onstart = function() {
+            console.log('Reconhecimento de voz iniciado');
+        };
+        
+        recognition.onerror = function(event) {
+            console.error('Erro no reconhecimento de voz', event.error);
+            
+            const errorMessage = document.createElement('p');
+            errorMessage.style.color = 'red';
+            errorMessage.textContent = `Erro: ${event.error}`;
+            outputDiv.appendChild(errorMessage);
+            
+            stopRecognition();
+        };
+        
+        recognition.onend = function() {
+            console.log('Reconhecimento de voz finalizado');
+            
+            // Clean up any interim elements
+            const interimElement = document.getElementById('interim');
+            if (interimElement) {
+                interimElement.remove();
+            }
+            
+            if (isListening) {
+                // If we're still supposed to be listening, restart recognition
+                // This handles the automatic timeout of the speech recognition API
+                recognition.start();
+            }
+        };
+        
+        // Initialize empty canvas
+        canvasCtx.fillStyle = 'rgb(20, 20, 30)';
+        canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
+    </script>
+</body>
+</html>
