@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Treinamento e Rastreamento de Objetos</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/mobilenet@2.1.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/knn-classifier@1.2.4"></script>
+</head>
+<body>
+    <header>
+        <h1>Treinamento e Rastreamento de Objetos</h1>
+    </header>
+    
+    <div class="main-container">
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="capture">Captura</button>
+            <button class="tab-btn" data-tab="train">Treinamento</button>
+            <button class="tab-btn" data-tab="track">Rastreamento</button>
+        </div>
+        
+        <!-- Aba de Captura -->
+        <div id="capture-tab" class="tab-content active">
+            <div class="displays-container">
+                <div class="camera-container">
+                    <div class="container-label">Câmera</div>
+                    <video id="capture-video" playsinline autoplay></video>
+                    <canvas id="capture-canvas" class="overlay-canvas"></canvas>
+                    <div class="camera-controls">
+                        <button id="capture-btn" class="action-btn">Capturar Imagem</button>
+                        <span class="capture-count">0 imagens</span>
+                    </div>
+                </div>
+                
+                <div class="samples-container">
+                    <div class="container-label">Amostras Capturadas</div>
+                    <div class="samples-form">
+                        <div class="form-group">
+                            <label for="object-name">Nome do Objeto:</label>
+                            <input type="text" id="object-name" placeholder="Ex: Xícara, Controle, Livro">
+                        </div>
+                        <div class="class-selector">
+                            <div class="class-btn active" data-class="object">Objeto</div>
+                            <div class="class-btn" data-class="background">Fundo</div>
+                        </div>
+                    </div>
+                    <div class="samples-grid" id="object-samples">
+                        <!-- As amostras serão adicionadas aqui -->
+                        <div class="empty-state">Nenhuma amostra do objeto capturada</div>
+                    </div>
+                    <div class="samples-grid hidden" id="background-samples">
+                        <!-- As amostras do fundo serão adicionadas aqui -->
+                        <div class="empty-state">Nenhuma amostra do fundo capturada</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="instructions-panel">
+                <h3>Instruções de Captura</h3>
+                <ol>
+                    <li>Digite um nome para o objeto que deseja rastrear</li>
+                    <li>Posicione o objeto na frente da câmera</li>
+                    <li>Clique em "Capturar Imagem" para adicionar uma amostra</li>
+                    <li>Capture pelo menos 20 imagens do objeto de diferentes ângulos</li>
+                    <li>Alterne para "Fundo" e capture pelo menos 20 imagens sem o objeto</li>
+                </ol>
+            </div>
+        </div>
+        
+        <!-- Aba de Treinamento -->
+        <div id="train-tab" class="tab-content">
+            <div class="training-container">
+                <div class="training-header">
+                    <h2>Treinamento do Modelo</h2>
+                    <div class="object-info">
+                        <span class="label">Objeto:</span>
+                        <span id="training-object-name">Não definido</span>
+                    </div>
+                    <div class="object-info">
+                        <span class="label">Amostras:</span>
+                        <span id="training-samples-count">0 objeto / 0 fundo</span>
+                    </div>
+                </div>
+                
+                <div class="training-options">
+                    <h3>Opções de Treinamento</h3>
+                    <div class="form-group">
+                        <label for="training-epochs">Épocas de Treinamento:</label>
+                        <input type="number" id="training-epochs" min="5" max="50" value="10">
+                    </div>
+                    <button id="start-training-btn" class="action-btn primary-btn">Iniciar Treinamento</button>
+                </div>
+                
+                <div class="training-progress">
+                    <h3>Progresso</h3>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" id="training-progress-bar"></div>
+                    </div>
+                    <div class="progress-info">
+                        <span id="training-progress-text">0%</span>
+                        <span id="training-status">Aguardando</span>
+                    </div>
+                </div>
+                
+                <div class="model-info">
+                    <h3>Modelos Salvos</h3>
+                    <div class="model-actions-toolbar">
+                        <button id="export-all-models" class="action-btn small-btn">Exportar Todos</button>
+                        <button id="import-model-btn" class="action-btn small-btn">Importar Modelo</button>
+                        <input type="file" id="import-model-input" accept=".json" style="display: none;">
+                    </div>
+                    <div id="models-list" class="models-grid">
+                        <!-- Os modelos serão adicionados aqui -->
+                        <div class="empty-state">Nenhum modelo treinado</div>
+                    </div>
+                    <div class="storage-info">
+                        <span id="storage-usage">Espaço utilizado: 0 MB</span>
+                        <button id="clear-all-models" class="action-btn danger-btn">Limpar Todos</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Aba de Rastreamento -->
+        <div id="track-tab" class="tab-content">
+            <div class="tracking-container">
+                <div class="tracking-header">
+                    <h2>Rastreamento de Objetos</h2>
+                    <div class="model-selector">
+                        <label for="model-select">Selecione um modelo:</label>
+                        <select id="model-select">
+                            <option value="">Selecione um modelo treinado</option>
+                        </select>
+                        <button id="load-model-btn" class="action-btn small-btn">Carregar</button>
+                    </div>
+                </div>
+                
+                <div class="tracking-display">
+                    <div class="camera-container large">
+                        <div class="container-label">Câmera com Rastreamento</div>
+                        <video id="tracking-video" playsinline autoplay></video>
+                        <canvas id="tracking-canvas" class="overlay-canvas"></canvas>
+                        
+                        <div class="tracking-info">
+                            <div class="info-item">
+                                <span class="label">Objeto:</span>
+                                <span id="tracking-object-name">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Confiança:</span>
+                                <span id="tracking-confidence">-</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="label">Posição:</span>
+                                <span id="tracking-position">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="tracking-controls">
+                    <div class="control-group">
+                        <label for="confidence-threshold">Limiar de Confiança:</label>
+                        <input type="range" id="confidence-threshold" min="0" max="1" step="0.05" value="0.7">
+                        <span id="threshold-value">0.7</span>
+                    </div>
+                    <div class="switch-group">
+                        <label for="tracking-active">Rastreamento Ativo:</label>
+                        <label class="switch">
+                            <input type="checkbox" id="tracking-active" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/capture.js"></script>
+    <script src="js/trainer.js"></script>
+    <script src="js/tracker.js"></script>
+    <script src="js/model_storage.js"></script>
+</body>
+</html>
