@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Face Tracking with MediaPipe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .camera-container, .mesh-container {
+            position: relative;
+            width: 48%;
+            height: 600px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .landmark-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Face Tracking</h1>
+    
+    <div class="displays-container">
+        <!-- Camera feed with face tracking -->
+        <div class="camera-container">
+            <div class="container-label">Camera Feed with Face Tracking</div>
+            <video id="video" playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+        </div>
+
+        <!-- Face mesh only view -->
+        <div class="mesh-container">
+            <div class="container-label">Face Mesh Only</div>
+            <canvas id="meshCanvas"></canvas>
+        </div>
+    </div>
+
+    <div class="landmark-info">
+        <h3>Facial Landmark Information:</h3>
+        <p>MediaPipe Face Mesh tracks 468 facial landmarks covering:</p>
+        <ul>
+            <li>Face oval: landmarks around the face contour</li>
+            <li>Eyebrows: left and right eyebrow landmarks</li>
+            <li>Eyes: landmarks for both eyes, including eyelids and iris</li>
+            <li>Nose: nasal bridge, nostrils, and tip</li>
+            <li>Lips: inner and outer lip contours</li>
+            <li>Face silhouette: jawline and cheeks</li>
+        </ul>
+        <p>The model can track expressions, head pose, and even eye gaze direction.</p>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const cameraCanvas = document.getElementById('cameraCanvas');
+        const meshCanvas = document.getElementById('meshCanvas');
+        
+        const cameraCtx = cameraCanvas.getContext('2d');
+        const meshCtx = meshCanvas.getContext('2d');
+        
+        // Set canvas sizes based on their container sizes
+        function resizeCanvases() {
+            const cameraContainer = document.querySelector('.camera-container');
+            const meshContainer = document.querySelector('.mesh-container');
+            
+            cameraCanvas.width = cameraContainer.clientWidth;
+            cameraCanvas.height = cameraContainer.clientHeight;
+            
+            meshCanvas.width = meshContainer.clientWidth;
+            meshCanvas.height = meshContainer.clientHeight;
+        }
+        
+        // Call resize on load and when window is resized
+        window.addEventListener('load', resizeCanvases);
+        window.addEventListener('resize', resizeCanvases);
+
+        // Face mesh specific settings
+        const FACEMESH_TESSELATION = window.FACEMESH_TESSELATION;
+        const FACEMESH_RIGHT_EYE = window.FACEMESH_RIGHT_EYE;
+        const FACEMESH_RIGHT_EYEBROW = window.FACEMESH_RIGHT_EYEBROW;
+        const FACEMESH_LEFT_EYE = window.FACEMESH_LEFT_EYE;
+        const FACEMESH_LEFT_EYEBROW = window.FACEMESH_LEFT_EYEBROW;
+        const FACEMESH_FACE_OVAL = window.FACEMESH_FACE_OVAL;
+        const FACEMESH_LIPS = window.FACEMESH_LIPS;
+
+        // Define drawing options for different facial features
+        const meshDrawingOptions = {
+            faceOval: {
+                color: '#E0E0E0',
+                lineWidth: 1
+            },
+            rightEye: {
+                color: '#30FF30',
+                lineWidth: 1
+            },
+            leftEye: {
+                color: '#30FF30',
+                lineWidth: 1
+            },
+            rightEyebrow: {
+                color: '#FF3030',
+                lineWidth: 1
+            },
+            leftEyebrow: {
+                color: '#FF3030',
+                lineWidth: 1
+            },
+            lips: {
+                color: '#E0E0E0',
+                lineWidth: 1
+            },
+            tesselation: {
+                color: 'rgba(180, 180, 180, 0.5)',
+                lineWidth: 0.5
+            }
+        };
+
+        function onResults(results) {
+            // Process camera canvas - show camera feed + face tracking
+            cameraCtx.save();
+            cameraCtx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+            cameraCtx.drawImage(results.image, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            
+            // Process mesh canvas - show only face mesh on plain background
+            meshCtx.save();
+            meshCtx.clearRect(0, 0, meshCanvas.width, meshCanvas.height);
+            meshCtx.fillStyle = '#000000';
+            meshCtx.fillRect(0, 0, meshCanvas.width, meshCanvas.height);
+            
+            if (results.multiFaceLandmarks) {
+                for (const landmarks of results.multiFaceLandmarks) {
+                    // Draw the facial mesh tessellation on both canvases
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_TESSELATION,
+                        meshDrawingOptions.tesselation);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_TESSELATION,
+                        meshDrawingOptions.tesselation);
+                    
+                    // Draw face oval
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_FACE_OVAL,
+                        meshDrawingOptions.faceOval);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_FACE_OVAL,
+                        meshDrawingOptions.faceOval);
+                    
+                    // Draw eyes
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_LEFT_EYE,
+                        meshDrawingOptions.leftEye);
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_RIGHT_EYE,
+                        meshDrawingOptions.rightEye);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_LEFT_EYE,
+                        meshDrawingOptions.leftEye);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_RIGHT_EYE,
+                        meshDrawingOptions.rightEye);
+                    
+                    // Draw eyebrows
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_LEFT_EYEBROW,
+                        meshDrawingOptions.leftEyebrow);
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_RIGHT_EYEBROW,
+                        meshDrawingOptions.rightEyebrow);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_LEFT_EYEBROW,
+                        meshDrawingOptions.leftEyebrow);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_RIGHT_EYEBROW,
+                        meshDrawingOptions.rightEyebrow);
+                    
+                    // Draw lips
+                    drawConnectors(
+                        cameraCtx, landmarks, FACEMESH_LIPS,
+                        meshDrawingOptions.lips);
+                    drawConnectors(
+                        meshCtx, landmarks, FACEMESH_LIPS,
+                        meshDrawingOptions.lips);
+                    
+                    // Draw landmark points (only a subset to avoid cluttering)
+                    const keyPoints = [
+                        0, 10, 50, 100, 150, 200, 250, 300, 350, 400, 450  // Sample points across the face
+                    ];
+                    
+                    for (const idx of keyPoints) {
+                        if (landmarks[idx]) {
+                            // Camera canvas landmarks
+                            cameraCtx.fillStyle = '#FFFFFF';
+                            cameraCtx.beginPath();
+                            cameraCtx.arc(
+                                landmarks[idx].x * cameraCanvas.width,
+                                landmarks[idx].y * cameraCanvas.height,
+                                2, 0, 2 * Math.PI
+                            );
+                            cameraCtx.fill();
+                            
+                            // Camera canvas IDs (only for key points)
+                            cameraCtx.fillStyle = '#FFFFFF';
+                            cameraCtx.font = '10px Arial';
+                            cameraCtx.fillText(
+                                `${idx}`, 
+                                landmarks[idx].x * cameraCanvas.width + 5, 
+                                landmarks[idx].y * cameraCanvas.height + 5
+                            );
+                            
+                            // Mesh canvas landmarks
+                            meshCtx.fillStyle = '#FFFFFF';
+                            meshCtx.beginPath();
+                            meshCtx.arc(
+                                landmarks[idx].x * meshCanvas.width,
+                                landmarks[idx].y * meshCanvas.height,
+                                2, 0, 2 * Math.PI
+                            );
+                            meshCtx.fill();
+                            
+                            // Mesh canvas IDs (only for key points)
+                            meshCtx.fillStyle = '#FFFFFF';
+                            meshCtx.font = '10px Arial';
+                            meshCtx.fillText(
+                                `${idx}`, 
+                                landmarks[idx].x * meshCanvas.width + 5, 
+                                landmarks[idx].y * meshCanvas.height + 5
+                            );
+                        }
+                    }
+                }
+            }
+            
+            cameraCtx.restore();
+            meshCtx.restore();
+        }
+
+        const faceMesh = new FaceMesh({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+            }
+        });
+        
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await faceMesh.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start();
+    </script>
+</body>
+</html>
