@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="utf-8">
+    <title>Reconhecimento de Gestos</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Reconhecimento de Gestos</h1>
+    </header>
+    
+    <div class="main-container">
+        <div class="displays-container">
+            <!-- Camera feed with hand tracking -->
+            <div class="camera-container">
+                <div class="container-label">Câmera com Rastreamento</div>
+                <video id="video" playsinline></video>
+                <canvas id="handCanvas"></canvas>
+                <div id="recognition-result" class="recognition-result"></div>
+            </div>
+
+            <!-- Gesture management -->
+            <div class="gesture-container">
+                <div class="container-label">Gerenciamento de Gestos</div>
+                
+                <div class="gesture-tabs">
+                    <button class="tab-btn active" data-tab="record">Gravar Gestos</button>
+                    <button class="tab-btn" data-tab="library">Biblioteca</button>
+                </div>
+                
+                <div class="tab-content active" id="record-tab">
+                    <h3>Gravar Novo Gesto</h3>
+                    <div class="form-group">
+                        <label for="gesture-name">Nome do Gesto:</label>
+                        <input type="text" id="gesture-name" placeholder="Ex: Aceno, OK, Paz">
+                    </div>
+                    
+                    <div class="recording-controls">
+                        <button id="start-recording" class="action-btn record-btn">Iniciar Gravação</button>
+                        <button id="cancel-recording" class="action-btn cancel-btn" disabled>Cancelar</button>
+                        <div class="recording-status">
+                            <span class="status-indicator"></span>
+                            <span id="recording-status-text">Pronto para gravar</span>
+                        </div>
+                    </div>
+                    
+                    <div class="recording-instructions">
+                        <h4>Instruções:</h4>
+                        <ol>
+                            <li>Digite um nome para o gesto</li>
+                            <li>Clique em "Iniciar Gravação"</li>
+                            <li>Faça o gesto e mantenha-o por 3 segundos</li>
+                            <li>O gesto será salvo automaticamente</li>
+                        </ol>
+                    </div>
+                </div>
+                
+                <div class="tab-content" id="library-tab">
+                    <h3>Gestos Salvos</h3>
+                    <div class="gesture-list" id="gesture-list">
+                        <!-- Gestos serão adicionados aqui dinamicamente -->
+                        <div class="empty-state">Nenhum gesto cadastrado</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="settings-panel">
+            <h3>Configurações</h3>
+            <div class="settings-group">
+                <label>
+                    <input type="checkbox" id="show-landmarks" checked>
+                    Mostrar pontos-chave
+                </label>
+                <label>
+                    <input type="checkbox" id="show-connections" checked>
+                    Mostrar conexões
+                </label>
+            </div>
+            <div class="settings-group">
+                <label for="detection-confidence">Confiança mínima:</label>
+                <input type="range" id="detection-confidence" min="0" max="1" step="0.1" value="0.7">
+                <span id="confidence-value">0.7</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="js/hand_tracking.js"></script>
+    <script src="js/gesture_recorder.js"></script>
+    <script src="js/gesture_recognizer.js"></script>
+</body>
+</html>
