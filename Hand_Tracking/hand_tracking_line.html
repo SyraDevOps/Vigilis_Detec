@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Hand Tracking - Thumb to Index Distance</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .camera-container, .skeleton-container {
+            position: relative;
+            width: 48%;
+            height: 600px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video, canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .distance-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Thumb to Index Finger Distance</h1>
+    <div class="displays-container">
+        <div class="camera-container">
+            <div class="container-label">Camera Feed with Tracking</div>
+            <video id="video" playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+        </div>
+        <div class="skeleton-container">
+            <div class="container-label">Hand Skeletons Only</div>
+            <canvas id="skeletonCanvas"></canvas>
+        </div>
+    </div>
+    <div class="distance-info" id="distanceInfo">
+        Distances will appear here.
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script>
+        const videoElement = document.getElementById('video');
+        const cameraCanvas = document.getElementById('cameraCanvas');
+        const skeletonCanvas = document.getElementById('skeletonCanvas');
+        const distanceInfo = document.getElementById('distanceInfo');
+        const cameraCtx = cameraCanvas.getContext('2d');
+        const skeletonCtx = skeletonCanvas.getContext('2d');
+
+        function resizeCanvases() {
+            const cameraContainer = document.querySelector('.camera-container');
+            const skeletonContainer = document.querySelector('.skeleton-container');
+            cameraCanvas.width = cameraContainer.clientWidth;
+            cameraCanvas.height = cameraContainer.clientHeight;
+            skeletonCanvas.width = skeletonContainer.clientWidth;
+            skeletonCanvas.height = skeletonContainer.clientHeight;
+        }
+        window.addEventListener('load', resizeCanvases);
+        window.addEventListener('resize', resizeCanvases);
+
+        function drawLineAndDistance(ctx, x1, y1, x2, y2, color, distance) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText(`${distance.toFixed(1)} px`, (x1 + x2) / 2 + 10, (y1 + y2) / 2);
+        }
+
+        function onResults(results) {
+            cameraCtx.save();
+            cameraCtx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+            cameraCtx.drawImage(results.image, 0, 0, cameraCanvas.width, cameraCanvas.height);
+
+            skeletonCtx.save();
+            skeletonCtx.clearRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+            skeletonCtx.fillStyle = '#000000';
+            skeletonCtx.fillRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+
+            let distancesText = '';
+            if (results.multiHandLandmarks) {
+                for (let handIndex = 0; handIndex < results.multiHandLandmarks.length; handIndex++) {
+                    const landmarks = results.multiHandLandmarks[handIndex];
+                    const handedness = results.multiHandedness[handIndex].label;
+                    const handColor = handedness === 'Left' ? '#00FF00' : '#FF0000';
+
+                    // Draw skeletons
+                    drawConnectors(cameraCtx, landmarks, HAND_CONNECTIONS, {color: handColor});
+                    drawConnectors(skeletonCtx, landmarks, HAND_CONNECTIONS, {color: handColor});
+
+                    // Draw landmarks
+                    for (let i = 0; i < landmarks.length; i++) {
+                        const landmark = landmarks[i];
+                        cameraCtx.fillStyle = handColor;
+                        cameraCtx.beginPath();
+                        cameraCtx.arc(
+                            landmark.x * cameraCanvas.width,
+                            landmark.y * cameraCanvas.height,
+                            5, 0, 2 * Math.PI
+                        );
+                        cameraCtx.fill();
+                        skeletonCtx.fillStyle = handColor;
+                        skeletonCtx.beginPath();
+                        skeletonCtx.arc(
+                            landmark.x * skeletonCanvas.width,
+                            landmark.y * skeletonCanvas.height,
+                            5, 0, 2 * Math.PI
+                        );
+                        skeletonCtx.fill();
+                    }
+
+                    // Thumb tip (4) and Index tip (8)
+                    const thumb = landmarks[4];
+                    const index = landmarks[8];
+                    const x1_cam = thumb.x * cameraCanvas.width;
+                    const y1_cam = thumb.y * cameraCanvas.height;
+                    const x2_cam = index.x * cameraCanvas.width;
+                    const y2_cam = index.y * cameraCanvas.height;
+                    const x1_skel = thumb.x * skeletonCanvas.width;
+                    const y1_skel = thumb.y * skeletonCanvas.height;
+                    const x2_skel = index.x * skeletonCanvas.width;
+                    const y2_skel = index.y * skeletonCanvas.height;
+
+                    // Distance in pixels (camera canvas)
+                    const dist = Math.sqrt((x2_cam - x1_cam) ** 2 + (y2_cam - y1_cam) ** 2);
+
+                    // Draw line and distance
+                    drawLineAndDistance(cameraCtx, x1_cam, y1_cam, x2_cam, y2_cam, handColor, dist);
+                    drawLineAndDistance(skeletonCtx, x1_skel, y1_skel, x2_skel, y2_skel, handColor, dist);
+
+                    distancesText += `<b>Mão ${handIndex} (${handedness}):</b> ${dist.toFixed(1)} pixels<br>`;
+                }
+            }
+            distanceInfo.innerHTML = distancesText || 'Nenhuma mão detectada.';
+            cameraCtx.restore();
+            skeletonCtx.restore();
+        }
+
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>

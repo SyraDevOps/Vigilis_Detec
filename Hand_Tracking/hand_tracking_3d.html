@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Hand Tracking - 3D Sphere Control</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .displays-container {
+            display: flex;
+            justify-content: space-between;
+            width: 90%;
+            margin-bottom: 20px;
+        }
+        .camera-container, .three-container {
+            position: relative;
+            width: 48%;
+            height: 600px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        video, canvas, .three-canvas {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .container-label {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            z-index: 10;
+            font-weight: bold;
+        }
+        .distance-info {
+            margin-top: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            width: 90%;
+        }
+        h1 {
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Controle 3D com as Mãos</h1>
+    <div class="displays-container">
+        <div class="camera-container">
+            <div class="container-label">Camera Feed with Tracking</div>
+            <video id="video" playsinline></video>
+            <canvas id="cameraCanvas"></canvas>
+        </div>
+        <div class="three-container">
+            <div class="container-label">3D Sphere Control</div>
+            <div id="threeContainer" style="width:100%;height:100%;"></div>
+        </div>
+    </div>
+    <div class="distance-info" id="distanceInfo">
+        Distances will appear here.
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
+    <script>
+        // --- Camera and Canvas Setup ---
+        const videoElement = document.getElementById('video');
+        const cameraCanvas = document.getElementById('cameraCanvas');
+        const distanceInfo = document.getElementById('distanceInfo');
+        const cameraCtx = cameraCanvas.getContext('2d');
+
+        function resizeCanvases() {
+            const cameraContainer = document.querySelector('.camera-container');
+            cameraCanvas.width = cameraContainer.clientWidth;
+            cameraCanvas.height = cameraContainer.clientHeight;
+            // Resize Three.js renderer
+            if (renderer) {
+                const threeContainer = document.getElementById('threeContainer');
+                renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+                camera.aspect = threeContainer.clientWidth / threeContainer.clientHeight;
+                camera.updateProjectionMatrix();
+            }
+        }
+        window.addEventListener('load', resizeCanvases);
+        window.addEventListener('resize', resizeCanvases);
+
+        // --- Three.js Setup ---
+        let scene, threeCamera, renderer, sphere;
+        function initThree() {
+            const threeContainer = document.getElementById('threeContainer');
+            scene = new THREE.Scene();
+            threeCamera = new THREE.PerspectiveCamera(75, threeContainer.clientWidth / threeContainer.clientHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({antialias: true, alpha: true});
+            renderer.setClearColor(0x222222, 1);
+            renderer.setSize(threeContainer.clientWidth, threeContainer.clientHeight);
+            renderer.domElement.className = 'three-canvas';
+            threeContainer.appendChild(renderer.domElement);
+
+            // Luz
+            const light = new THREE.PointLight(0xffffff, 1, 100);
+            light.position.set(10, 10, 10);
+            scene.add(light);
+
+            // Esfera
+            const geometry = new THREE.SphereGeometry(1, 32, 32);
+            const material = new THREE.MeshStandardMaterial({color: 0x00aaff});
+            sphere = new THREE.Mesh(geometry, material);
+            scene.add(sphere);
+
+            // Posição inicial da câmera
+            threeCamera.position.z = 5;
+        }
+        initThree();
+
+        function animateThree() {
+            requestAnimationFrame(animateThree);
+            renderer.render(scene, threeCamera);
+        }
+        animateThree();
+
+        // --- Hand Tracking ---
+        function drawLineAndDistance(ctx, x1, y1, x2, y2, color, distance) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.font = 'bold 18px Arial';
+            ctx.fillText(`${distance.toFixed(1)} px`, (x1 + x2) / 2 + 10, (y1 + y2) / 2);
+        }
+
+        // Variáveis para controlar a esfera
+        let leftDist = 0, rightDist = 0;
+
+        function onResults(results) {
+            cameraCtx.save();
+            cameraCtx.clearRect(0, 0, cameraCanvas.width, cameraCanvas.height);
+            cameraCtx.drawImage(results.image, 0, 0, cameraCanvas.width, cameraCanvas.height);
+
+            let distancesText = '';
+            leftDist = 0;
+            rightDist = 0;
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                for (let handIndex = 0; handIndex < results.multiHandLandmarks.length; handIndex++) {
+                    const landmarks = results.multiHandLandmarks[handIndex];
+                    const handedness = results.multiHandedness[handIndex].label; // 'Left' ou 'Right'
+                    const handColor = handedness === 'Left' ? '#00FF00' : '#FF0000';
+
+                    // Draw skeletons
+                    drawConnectors(cameraCtx, landmarks, HAND_CONNECTIONS, {color: handColor});
+
+                    // Draw landmarks
+                    for (let i = 0; i < landmarks.length; i++) {
+                        const landmark = landmarks[i];
+                        cameraCtx.fillStyle = handColor;
+                        cameraCtx.beginPath();
+                        cameraCtx.arc(
+                            landmark.x * cameraCanvas.width,
+                            landmark.y * cameraCanvas.height,
+                            5, 0, 2 * Math.PI
+                        );
+                        cameraCtx.fill();
+                    }
+
+                    // Thumb tip (4) e Index tip (8)
+                    const thumb = landmarks[4];
+                    const index = landmarks[8];
+                    const x1_cam = thumb.x * cameraCanvas.width;
+                    const y1_cam = thumb.y * cameraCanvas.height;
+                    const x2_cam = index.x * cameraCanvas.width;
+                    const y2_cam = index.y * cameraCanvas.height;
+
+                    // Distância em pixels (camera canvas)
+                    const dist = Math.sqrt((x2_cam - x1_cam) ** 2 + (y2_cam - y1_cam) ** 2);
+
+                    // Linha e distância
+                    drawLineAndDistance(cameraCtx, x1_cam, y1_cam, x2_cam, y2_cam, handColor, dist);
+
+                    distancesText += `<b>Mão ${handIndex} (${handedness}):</b> ${dist.toFixed(1)} pixels<br>`;
+
+                    // Atualiza variáveis para a esfera
+                    if (handedness === 'Left') leftDist = dist;
+                    if (handedness === 'Right') rightDist = dist;
+                }
+            }
+            distanceInfo.innerHTML = distancesText || 'Nenhuma mão detectada.';
+
+            // Atualiza esfera 3D
+            updateSphere();
+            cameraCtx.restore();
+        }
+
+        // Atualiza a posição da esfera conforme as distâncias
+        function updateSphere() {
+            // Normalização simples para o range da escala
+            // Altura (Y): mão esquerda, Largura (X): mão direita
+            // Ajuste os valores mínimos/máximos conforme necessário para seu uso
+            let scaleY = 1, scaleX = 1;
+            if (leftDist > 0) {
+                scaleY = (leftDist - 50) / 200 * 2 + 1; // mapeia para escala de 1 a 3
+                scaleY = Math.max(0.5, Math.min(3, scaleY));
+            }
+            if (rightDist > 0) {
+                scaleX = (rightDist - 50) / 200 * 2 + 1; // mapeia para escala de 1 a 3
+                scaleX = Math.max(0.5, Math.min(3, scaleX));
+            }
+            sphere.scale.x = scaleX;
+            sphere.scale.y = scaleY;
+            // Se quiser controlar a "profundidade" (z), pode adicionar:
+            // sphere.scale.z = ...;
+        }
+
+        // --- MediaPipe Hands Setup ---
+        const hands = new Hands({
+            locateFile: (file) => {
+                return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+            }
+        });
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        camera.start();
+    </script>
+</body>
+</html>
